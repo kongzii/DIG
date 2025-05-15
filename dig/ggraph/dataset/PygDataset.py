@@ -186,11 +186,11 @@ class PygDataset(InMemoryDataset):
             if self.use_aug:
                 local_perm = np.random.permutation(mol_size)
                 adj_perm = pure_adj[np.ix_(local_perm, local_perm)]
-                G = nx.from_numpy_matrix(np.asmatrix(adj_perm))
+                G = nx.from_numpy_array(np.asmatrix(adj_perm))
                 start_idx = np.random.randint(adj_perm.shape[0])
             else:
                 local_perm = np.arange(mol_size)
-                G = nx.from_numpy_matrix(np.asmatrix(pure_adj))
+                G = nx.from_numpy_array(np.asmatrix(pure_adj))
                 start_idx = 0
 
             bfs_perm = np.array(self._bfs_seq(G, start_idx))
@@ -204,6 +204,12 @@ class PygDataset(InMemoryDataset):
 
         return data
     
+    def smiles_filtered_out(self):
+        used_smiles = set(self.get(idx)['smile'] for idx in range(len(self)))
+        all_used_smiles = set(self.all_used_smiles)
+        filtered_out = all_used_smiles - used_smiles
+        return filtered_out
+    
     def pre_process(self):
         input_path = self.raw_paths[0]
         input_df = pd.read_csv(input_path, sep=',', dtype='str')
@@ -211,7 +217,9 @@ class PygDataset(InMemoryDataset):
         if self.available_prop:
                 prop_list = list(input_df[self.prop_name])
         
-        self.all_smiles = smile_list
+        self.all_smiles = [Chem.CanonSmiles(x) for x in smile_list]
+        self.all_used_smiles = []
+
         data_list = []
         
         for i in range(len(smile_list)):
@@ -222,6 +230,7 @@ class PygDataset(InMemoryDataset):
             if num_atom > self.num_max_node:
                 continue
             else:
+                self.all_used_smiles.append(Chem.CanonSmiles(smile))
                 # atoms
                 atom_array = np.zeros((self.num_max_node, len(self.atom_list)), dtype=np.float32)
 
@@ -262,7 +271,7 @@ class PygDataset(InMemoryDataset):
         if self.available_prop:
                 prop_list = list(input_df[self.prop_name])
                 
-        self.all_smiles = smile_list
+        self.all_smiles = [Chem.CanonSmiles(x) for x in smile_list]
         data_list = []
                 
         for i in range(len(smile_list)):

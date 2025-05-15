@@ -211,7 +211,7 @@ class QM93DGEN(InMemoryDataset):
         atom_valency = torch.sum(con_mat, dim=1)
 
         squared_dist = torch.sum(torch.square(position[:,None,:] - position[None,:,:]), dim=-1)      
-        nx_graph = nx.from_numpy_matrix(squared_dist.numpy())
+        nx_graph = nx.from_numpy_array(squared_dist.numpy())
         edges = list(tree.minimum_spanning_edges(nx_graph, algorithm='prim', data=False))
 
         focus_node_id, target_node_id = zip(*edges)

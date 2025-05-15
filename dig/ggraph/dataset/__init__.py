@@ -1,10 +1,11 @@
 from .PygDataset import PygDataset
-from .ggraph_dataset import QM9, ZINC250k, ZINC800, MOSES
+from .ggraph_dataset import QM9, ZINC250k, ZINC800, MOSES, SmilesDataset
 
 __all__ = [
     'QM9', 
     'ZINC250k',
     'ZINC800',
     'MOSES',
-    'PygDataset'
+    'PygDataset',
+    'SmilesDataset',
 ]

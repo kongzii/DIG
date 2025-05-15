@@ -16,6 +16,8 @@ class GraphDF(Generator):
     def __init__(self):
         super(GraphDF, self).__init__()
         self.model = None
+        self.all_generated_smiles_list = []
+        self.all_generated_smiles_set = set()
     
 
     def get_model(self, task, model_conf_dict, checkpoint_path=None):
@@ -40,7 +42,7 @@ class GraphDF(Generator):
                 self.model.state_dict()[key].copy_(load_key[key].detach().clone())
 
 
-    def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict, save_interval, save_dir):
+    def train_rand_gen(self, logger_mlflow, loader, n_to_gen, lr, wd, max_epochs, model_conf_dict, save_interval, save_dir, val_smiles, data_name):
         r"""
             Running training for random generation task.
 
@@ -60,8 +62,9 @@ class GraphDF(Generator):
         self.model.train()
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=lr, weight_decay=wd)
         if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
+            os.makedirs(save_dir, exist_ok=True)
 
+        global_step = 0
         for epoch in range(1, max_epochs+1):
             total_loss = 0
             for batch, data_batch in enumerate(loader):
@@ -78,14 +81,40 @@ class GraphDF(Generator):
                 optimizer.step()
 
                 total_loss += loss.to('cpu').item()
+                global_step += 1
                 print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
+
+                if global_step % save_interval == 0:
+                    checkpoint_path = os.path.join(save_dir, f'rand_gen_ckpt.{data_name}.pth')
+                    torch.save(self.model.state_dict(), checkpoint_path)
+                    all_generated_smiles_path = os.path.join(save_dir, f'all_generated_smiles.{data_name}.in-training.txt')
+                    with open(all_generated_smiles_path, 'w') as f:
+                        for smile in self.all_generated_smiles_list:
+                            f.write(smile + '\n')
+                    all_smiles, _, _ =self.run_rand_gen(
+                        model_conf_dict, checkpoint_path, n_mols=n_to_gen, num_min_node=model_conf_dict['num_min_node'], num_max_node=model_conf_dict['num_max_node'], temperature=model_conf_dict['temperature'], atomic_num_list=model_conf_dict['atomic_num_list']
+                    )
+                    self.all_generated_smiles_list.extend(all_smiles)
+                    self.all_generated_smiles_set.update(all_smiles)
+                    perc_generated = len(self.all_generated_smiles_set & set(val_smiles)) / len(val_smiles)
+                    logger_mlflow.log_metrics(
+                        {
+                            "val/ratio_generated_in_val": perc_generated,
+                            "val/n_generated_samples": len(self.all_generated_smiles_list),
+                            "val/n_generated_samples_unique": len(self.all_generated_smiles_set),
+                            "val/unique_ratio": len(self.all_generated_smiles_set) / len(self.all_generated_smiles_list),
+                        }, step=global_step
+                    )
+                    logger_mlflow.log_metrics(
+                        {
+                            "val/ratio_generated_in_val/by_gen_count": perc_generated,
+                        },
+                        step=len(self.all_generated_smiles_list),
+                    )
+                    logger_mlflow.log_artifact(all_generated_smiles_path)
 
             avg_loss = total_loss / (batch + 1)
             print("Training | Average loss {}".format(avg_loss))
-            
-            if epoch % save_interval == 0:
-                torch.save(self.model.state_dict(), os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))
-
 
     def run_rand_gen(self, model_conf_dict, checkpoint_path, n_mols=100, num_min_node=7, num_max_node=25, temperature=[0.3, 0.3], atomic_num_list=[6, 7, 8, 9]):
         r"""
@@ -109,19 +138,22 @@ class GraphDF(Generator):
         self.get_model('rand_gen', model_conf_dict, checkpoint_path)
         self.model.eval()
         all_mols, pure_valids = [], []
+        all_smiles = []
         cnt_mol = 0
 
         while cnt_mol < n_mols:
             mol, no_resample, num_atoms = self.model.generate(atom_list=atomic_num_list, min_atoms=num_min_node, max_atoms=num_max_node, temperature=temperature)
+            smile = Chem.CanonSmiles(Chem.MolToSmiles(mol))
             if (num_atoms >= num_min_node):
                 cnt_mol += 1
                 all_mols.append(mol)
+                all_smiles.append(smile)
                 pure_valids.append(no_resample)
                 if cnt_mol % 10 == 0:
                     print('Generated {} molecules'.format(cnt_mol))
         
         assert cnt_mol == n_mols, 'number of generated molecules does not equal num'        
-        return all_mols, pure_valids
+        return all_smiles, all_mols, pure_valids
 
 
     def train_prop_opt(self, lr, wd, max_iters, warm_up, model_conf_dict, pretrain_path, save_interval, save_dir):

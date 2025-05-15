@@ -1,6 +1,7 @@
 import numpy as np
 from rdkit import Chem
 from dig.ggraph.dataset import PygDataset
+from dig.ggraph.dataset.SmilesDataset import SmilesDataset  # noqa: Keep here.
 
 bond_type_to_int = {Chem.BondType.SINGLE: 0, Chem.BondType.DOUBLE: 1, Chem.BondType.TRIPLE: 2}
 zinc_atom_list = [6, 7, 8, 9, 15, 16, 17, 35, 53]
